@@ -33,4 +33,4 @@ jobs:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           KAKAO_REFRESH_TOKEN: ${{ secrets.KAKAO_REFRESH_TOKEN }}
         run: |
-          python summarizer.py "AI 최신 동향"
+          python scheduler/news/ai/summarizer.py "AI 최신 동향"
