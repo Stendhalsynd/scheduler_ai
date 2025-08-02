@@ -9,6 +9,25 @@ from dotenv import load_dotenv # 1. 라이브러리 불러오기
 from kakao_sender import send_kakao_message # kakao_sender 임포트
 from datetime import datetime
 
+# [추가] 이전에 보낸 헤드라인을 기록할 파일
+HISTORY_FILE = "sent_headlines.txt"
+
+# [추가] 이전에 보낸 헤드라인을 불러오는 함수
+def load_sent_headlines():
+    """기록 파일에서 이전에 보낸 헤드라인을 불러옵니다."""
+    try:
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return set(line.strip() for line in f)
+    except FileNotFoundError:
+        return set()
+    
+# [추가] 새로 보낸 헤드라인을 기록 파일에 추가하는 함수
+def add_headlines_to_history(headlines):
+    """새로 처리한 헤드라인을 기록 파일에 추가합니다."""
+    with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+        for headline in headlines:
+            f.write(headline + '\n')
+
 # --- 1단계: 뉴스 스크레이핑 함수 (수정됨) ---
 def scrape_google_news(query):
     """지정된 쿼리로 구글 뉴스 헤드라인을 스크레이핑하는 함수 (개선된 방식)"""
@@ -61,71 +80,77 @@ def scrape_google_news(query):
         print(f"뉴스 스크레이핑 중 오류 발생: {e}")
         return None
 
-# --- 2단계: Gemini로 요약하는 함수 ---
+# --- 2단계: Gemini로 요약하는 함수 ([수정] 프롬프트 변경) ---
 def summarize_with_gemini(headlines, api_key):
-    """Gemini Pro를 사용해 뉴스 헤드라인을 요약하는 함수"""
+    """Gemini Pro를 사용해 각 뉴스 헤드라인을 개별적으로 요약합니다."""
     print("Gemini Pro를 통해 뉴스를 요약합니다...")
     try:
-        # Gemini API 키 설정
         genai.configure(api_key=api_key)
-        
-        # 사용할 모델 설정
-        model = genai.GenerativeModel('gemini-1.5-flash') # 가볍고 빠른 모델
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
-        # 헤드라인 목록을 하나의 문자열로 먼저 만듭니다.
-        headline_text = "- " + "\n- ".join(headlines)
-
-        # Gemini에게 보낼 프롬프트(명령어) 구성
+        # [수정] 프롬프트를 각 헤드라인별 요약 및 목록 형식으로 요청하도록 변경
         prompt = f"""
-        다음은 최신 AI 뉴스 헤드라인 목록입니다. 
-        이 헤드라인들을 바탕으로 오늘날 AI 분야의 주요 동향을 3~5문장의 친절한 어투로 요약해주세요.
+        당신은 뉴스 요약 전문가입니다. 다음 각 뉴스 헤드라인에 대해, 핵심 내용을 2~3문장으로 요약해주세요.
+        결과는 아래와 같이 각 항목을 구분하여 목록 형태로 보여주세요.
 
-        [뉴스 헤드라인]
-        {headline_text}
+        [뉴스 헤드라인 목록]
+        - {"\n- ".join(headlines)}
+
+        [출력 형식 예시]
+        - [뉴스 제목]: 뉴스 요약 내용입니다.
+        - [다른 뉴스 제목]: 다른 뉴스에 대한 요약입니다.
         """
 
-        # API 호출하여 요약 생성
         response = model.generate_content(prompt)
-        
         print("요약 완료!")
-        return response.text
+        return response.text.strip()
 
     except Exception as e:
         print(f"Gemini 요약 중 오류 발생: {e}")
         return None
 
-# --- 메인 실행 부분 ---
-if __name__ == "__main__":
-    load_dotenv() # 2. .env 파일의 변수를 환경변수로 로드!
 
-    # 실행 시 검색어(query)를 인자로 받음
-    parser = argparse.ArgumentParser(description="뉴스를 검색, 요약하고 카카오톡으로 전송합니다.")
+# --- 메인 실행 부분 ([수정] 중복 제거 로직 추가) ---
+if __name__ == "__main__":
+    load_dotenv()
+
+    parser = argparse.ArgumentParser(description="새로운 뉴스를 검색, 요약하고 카카오톡으로 전송합니다.")
     parser.add_argument('query', type=str, help='검색할 뉴스 키워드')
     args = parser.parse_args()
 
-    # Gemini API 키 확인
-    if not os.environ.get("GEMINI_API_KEY"):
-        print("오류: GEMINI_API_KEY가 설정되지 않았습니다.")
-    # Kakao API 키 확인
-    elif not os.environ.get("KAKAO_REST_API_KEY") or not os.environ.get("KAKAO_REFRESH_TOKEN"):
-        print("오류: KAKAO_REST_API_KEY 또는 KAKAO_REFRESH_TOKEN이 설정되지 않았습니다.")
+    if not os.environ.get("GEMINI_API_KEY") or not os.environ.get("KAKAO_REST_API_KEY"):
+        print("오류: API 키가 설정되지 않았습니다.")
     else:
-        # 1. 뉴스 스크레이핑
-        news_headlines = scrape_google_news(args.query)
+        # [수정] 1. 이전에 보낸 헤드라인 불러오기
+        sent_headlines = load_sent_headlines()
+        print(f"기존에 전송한 뉴스 {len(sent_headlines)}건을 불러왔습니다.")
 
-        # 2. 뉴스 요약
-        if news_headlines:
-            summary = summarize_with_gemini(news_headlines, os.environ.get("GEMINI_API_KEY"))
+        # [수정] 2. 새로운 뉴스 스크레이핑
+        all_headlines = scrape_google_news(args.query)
+
+        if all_headlines:
+            # [수정] 3. 새로운 헤드라인만 필터링
+            new_headlines = [h for h in all_headlines if h not in sent_headlines]
             
-            # 3. 카카오톡으로 전송
-            if summary:
-                # 터미널에도 출력
-                print("\n✨ Gemini AI 뉴스 요약 ✨\n" + "="*30)
-                print(summary)
+            if not new_headlines:
+                print("새로운 뉴스가 없습니다. 프로그램을 종료합니다.")
+            else:
+                print(f"새로운 뉴스 {len(new_headlines)}건을 발견했습니다.")
+                # [수정] 4. 새로운 뉴스만 요약
+                summary = summarize_with_gemini(new_headlines, os.environ.get("GEMINI_API_KEY"))
                 
-                # 카톡 메시지 생성 및 발송
-                today_str = datetime.now().strftime('%Y년 %m월 %d일')
-                message = f"📰 {today_str} - '{args.query}' 뉴스 요약\n\n{summary}"
-                send_kakao_message(message)
+                if summary:
+                    # 터미널에도 출력
+                    print("\n✨ Gemini AI 뉴스 요약 ✨\n" + "="*30)
+                    print(summary)
+                    
+                    # [수정] 5. 카톡 메시지 생성 및 발송
+                    today_str = datetime.now().strftime('%Y년 %m월 %d일')
+                    message = f"📰 {today_str} - '{args.query}' 신규 뉴스\n\n{summary}"
+                    send_kakao_message(message)
+                    
+                    # [수정] 6. 성공적으로 보낸 후, 새 헤드라인을 기록
+                    add_headlines_to_history(new_headlines)
+                    print("새로운 뉴스 목록을 히스토리에 추가했습니다.")
         else:
             print("요약할 뉴스 헤드라인이 없습니다.")
