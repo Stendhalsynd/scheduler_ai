@@ -88,13 +88,16 @@ def summarize_with_gemini(headlines, api_key):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
 
+        # [수정된 부분] 헤드라인 목록을 하나의 문자열로 먼저 만듭니다.
+        headline_text = "- " + "\n- ".join(headlines)
+
         # [수정] 프롬프트를 각 헤드라인별 요약 및 목록 형식으로 요청하도록 변경
         prompt = f"""
         당신은 뉴스 요약 전문가입니다. 다음 각 뉴스 헤드라인에 대해, 핵심 내용을 2~3문장으로 요약해주세요.
         결과는 아래와 같이 각 항목을 구분하여 목록 형태로 보여주세요.
 
         [뉴스 헤드라인 목록]
-        - {"\n- ".join(headlines)}
+        {headline_text}
 
         [출력 형식 예시]
         - [뉴스 제목]: 뉴스 요약 내용입니다.
